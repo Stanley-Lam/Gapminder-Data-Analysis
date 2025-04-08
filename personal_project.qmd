@@ -1,0 +1,337 @@
+---
+title: "STAT 331 Personal Project"
+description: <a href="https://github.com/Stanley-Lam/Gapminder-Data-Analysis">Github page</a>
+author: "Stanley Lam"
+format: 
+  html:
+    html-table-processing: none
+    theme: default
+    code-tools: true
+    toc: true
+    embed-resources: true
+    code-fold: true
+execute: 
+  echo: true
+  eval: true
+  error: true
+  message: false
+  warning: false
+---
+
+## Setup
+
+```{r setup}
+# Open necessary libraries
+library(tidyverse)
+library(kableExtra)
+library(gganimate)
+library(gifski)
+```
+
+```{r}
+# Set seed & inport datasets
+inequality_data <- read.csv("inequality_index_gini.csv")
+sustainability_data <- read.csv("sdi.csv")
+```
+
+The data used in this analysis originates from the Gapminder Foundation, an independent educational non-profit organization dedicated to fighting global misconceptions. We have specifically utilized two datasets from their collection: Gini Coefficent" and "Sustainable Development Index". These datasets provide insights into societal trnds across various countries over time.
+
+#### "Gini Coefficent" Dataset
+This dataset contains a inequality rating for various countries, spanning from 1963 to 2023. It offers a measure of inequality, providing a crucial indicator of societal economic health. A score of 0 represents perfect equality while a score of 100 represents perfect inquality.
+
+#### "Sustainable Development Index" Dataset
+This dataset presents contains a sustainability rating for various countries, spanning from 1990 to 2019. It offers a measure of ecological efficiency in delivering human development. A score of 0 represents maximum efficiency while a score of 100 represents minimum efficiency. 
+
+These datasets were chosen to explore the potential relationship between inequality and sustainability. The hypothesis is that economic factors, such as inequality may correlate with human development - in this case sustainability. So specifically, we hypothesize that an increase in the inequality score will likely also lead to a decrease in the sustainability score.
+
+### Cleaning Data
+
+We will remove all missing data so it does not interfer with our analysis. We will also decide the timeframe in which we will analyze
+
+```{r}
+# Cleaning Inequality Data
+inequality_clean <- inequality_data |>
+  rename_with(~ sub("^X", "", .x)) |>
+  pivot_longer(cols = !country,
+               names_to = "year",
+               values_to = "Inequality_Index") |>
+  mutate(year = as.numeric(year)) |>
+  filter(!is.na(Inequality_Index))
+
+# Cleaning Sustainability Data
+sustainability_clean <- sustainability_data |>
+  rename_with(~ sub("^X", "", .x)) |>
+  pivot_longer(cols = !country,
+               names_to = "year",
+               values_to = "Sustainability_Index") |>
+  mutate(year = as.numeric(year)) |>
+  filter(!is.na(Sustainability_Index))
+```
+
+Before we join the two datasets, consider this observation
+
+```{r}
+data.frame("Inequality" = range(inequality_clean$year),
+           "Sustainability" = range(sustainability_clean$year),
+           row.names = c("Earliest Observation", "Latest Observation")) |>
+  kable() |>
+  kable_styling(full_width = F)
+```
+
+This table shows the earliest and latest year observed for both datasets. We will only work with the years that span both datasets so from 1990 to 2019. 
+
+```{r}
+inequal_sustain <-
+  inner_join(inequality_clean,
+             sustainability_clean,
+             by = join_by(country == country, 
+                          year == year)) # Prevents duplicate columns of the same variable
+```
+
+## Linear Regression
+
+With the clean data, we will now compare the relationship between our two quatitative variables using a scatterplot. Inequality will be our explanatory variable, while sustainability will be our response variable. 
+
+### Visual Plots
+
+```{r}
+inequal_sustain |>
+  ggplot(aes(x = Inequality_Index,
+             y = Sustainability_Index)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(title = "Relationship Between Inequality and Sustainability in Different Countries (1990 - 2019)",
+       x = "Inequality Index",
+       subtitle = "Sustainability Index") +
+  theme(axis.title.y = element_blank(),
+        axis.title.x = element_text(size = 12),
+        axis.text.x = element_text(size = 10),
+        axis.text.y = element_text(size = 10))
+```
+
+When looking at the linear regression, it appears that there is a week positive linear relationship between inequality and sustainability. 
+
+```{r}
+#| eval: false
+animation <- inequal_sustain |>
+  ggplot(aes(x = Inequality_Index,
+             y = Sustainability_Index)) +
+  geom_point(size = 3) +
+  labs(title = "Year: {round(frame_time)}", # Takes current year in frame_time and puts it in title
+       subtitle = "Sustainability Index",
+       x = "Inequality Index") +
+  theme(axis.title.y = element_blank(),
+        axis.title.x = element_text(size = 12),
+        axis.text.x = element_text(size = 10),
+        axis.text.y = element_text(size = 10)) + 
+  transition_time(year) +
+  ease_aes("linear")
+
+animate(animation, renderer = gifski_renderer())
+```
+
+From the animated visual, the correlation seems to roughly stay true for every year from 1900 to 2019. Also, it seems like there are more data as the span of the study went on. 
+
+### Linear Model
+
+Now that we've been able to take a look at a visual, let's see if we can fit a linear regression model to predict the sustainability index based on the inequality index.
+
+First, in order to make fitting the model slightly easier, we're going to condense each country's observations down into one row by taking the median value of the observations. 
+
+```{r}
+lr_inequal_sustain <- inequal_sustain |>
+  group_by(country) |>
+  summarise(med_inequality = median(Inequality_Index),
+            med_sustainability = median(Sustainability_Index))
+```
+
+Now that we have our condensed data, we should plot it before we actually fit the model. The following plot shows our condensed data, with each point representing one country's median sustainability and inequality index across all the years in the data.
+
+```{r}
+lr_inequal_sustain |>
+  ggplot(aes(x = med_inequality,
+                       y = med_sustainability)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(title = "Relationship Between Median Inequality Index and Sustainability Index in Different Countries",
+       subtitle = "Median Sustainability Index",
+       x = "Median Inequality Index") +
+  theme(axis.title.y = element_blank(),
+        axis.title.x = element_text(size = 12),
+        axis.text.y = element_text(size = 10))
+```
+
+After the consensation, there still seems like a weak positive linear relationship between inequality and sustainability.
+
+```{r}
+lm_inequal_sustain <-
+  lm(med_sustainability ~ med_inequality,
+     data = lr_inequal_sustain)
+
+broom::tidy(lm_inequal_sustain) |>
+  kable()
+```
+
+Looking at the output, we can see that the prediction equation of our model is as follows:
+
+$$\widehat{Median\ Sustainability\ Index}\ =\ 31.18\ + \ 0.138(Median\ Inequality\ Index)$$
+
+The intercept is 31.18, meaning when the inequality index is at 0, we expect to have a sustainability index of 31.18. The coefficient for the sustainability index is 0.138, so for each 1 increase in the inequality index, we expect the the sustainability index to increase by 0.138. 
+
+### Model Fit
+
+Now let's look at how well a linear model fits our data. We can find out by calculating the variation in our response variable, the fitted model values and residuals. 
+
+```{r}
+observation_col <- select(lr_inequal_sustain, med_sustainability)
+
+residual_table <- broom::augment(lm_inequal_sustain) |>
+  select(.fitted, .resid) |>
+  bind_cols(observation_col) |>
+  summarize(across(everything(),
+                   var, .names = "variance_{col}")) |>
+  pivot_longer(cols = everything(),
+               names_to = "Variance_Type",
+               values_to = "Variance") |>
+  mutate(Variance_Type = case_when(Variance_Type == "variance_.fitted" ~ "Fitted Values",
+                                   Variance_Type == "variance_.resid" ~ "Residuals",
+                                   Variance_Type == "variance_med_sustainability" ~ "Response Variable"))
+
+residual_table |>
+  kable(col.names = c("Variance Type",
+                      "Variance"),
+        caption = "Variation of Different Values",
+        digits = c(0, 1)) |>
+  kable_classic(full_width = F,
+                bootstrap_options = "striped") |>
+  row_spec(row = 0, bold = T, align = "c")
+```
+
+If the variance of the respone variable represents the total amount of variability, then the variance of the fitted values represent the proportion of the total variability that is explained by our linear model, and the variance of the residuals represent the proportion of the total variability that is not explained by our linear model. In this case, our linear model explained 7.4% of the total variability, making our linear model quite useless to observe the relationship between inequality and sustainability. OUr scatterplot also backs this up. Although the trend of the data seems to follow the line of best fit, there is just too much variability at any given point. This suggests that a linear model may not be the best model in representing our data. There is a possibility that there is no relationship between the two variables. 
+
+## Simulation
+
+Regardless, for the sake of the report, we will try to simulate what our outcomes should look like if it were a linear relationship.
+
+### Visualizing Simulations
+
+First, we will simulate sampling the data as if the data was linear with residuals that follow a normal distribution. Then we'll extract $R^2$ to find out the strength of the relationship between our simulated data and our observed data. 
+
+```{r}
+predicted_sustain <- predict(lm_inequal_sustain)
+
+est_sigma <- sigma(lm_inequal_sustain)
+
+random_error <- function(x, mean = 0, sd = 1) {
+  
+  error <- rnorm(length(x), mean, sd)
+  
+  return(x + error)
+}
+
+sim_response <- tibble(sim_sustain = random_error(predicted_sustain, sd = est_sigma))
+
+simulation <- lr_inequal_sustain |>
+  bind_cols(sim_response)
+
+lm_sim_inequal_sustain <- lm(sim_sustain ~ med_sustainability, 
+                             data = simulation)
+
+original_r_squared <- summary(lm_sim_inequal_sustain)$r.squared
+```
+
+The $R^2$ is `r round(original_r_squared, 4)` meaning that very little of the variability in our observed data is explained by our simulated results. Our simulated data is not a good explanation of our observed data. 
+
+```{r}
+simulation |>
+  ggplot(aes(x = sim_sustain, y = med_sustainability)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(title = "Simulated Data VS Observed Data",
+       subtitle = "Observed Sustainability Index",
+       x = "Simulated Sustainability Index") +
+  theme(axis.title.y = element_blank(),
+        axis.title.x = element_text(size = 12),
+        axis.text.y = element_text(size = 10))
+```
+
+This plot showing the relationship between simulated sustainability index and observed sustainability index backs up the low $R^2$ value. If the simulation was a good explainer for our observations, we'd expect to see a strong positive relationship between our simulated and observation. This plot tells us that our observations are nowhere near the expected sustainability index
+
+```{r}
+simulation |>
+  ggplot(aes(x = med_inequality,
+             y = med_sustainability)) +
+  geom_point() +
+  labs(title = "Observed Median Sustainability Index Across Countries",
+       subtitle = "Observed Sustainability Index",
+       x = "Median Inequality Index") +
+  theme(axis.title.y = element_blank(),
+        axis.title.x = element_text(size = 12),
+        axis.text.y = element_text(size = 10))
+  
+simulation |>
+  ggplot(aes(x = med_inequality,
+             y = sim_sustain)) + 
+  geom_point() +
+  labs(title = "Simulated Median Sustainability Index Across Countries",
+       subtitle = "Simulated Sustainability Index",
+       x = "Median Inequality Index") +
+  theme(axis.title.y = element_blank(),
+        axis.title.x = element_text(size = 12),
+        axis.text.y = element_text(size = 10))
+  
+```
+
+The relationship between the observed sustainability index and simulated sustainability to inequality index looks somewhat different hence the low $R^2$ value. Our simulated data looks concentrated to the center while our observed data looks concentrated to the top. However, both data show high variability.
+
+### Generating Multiple Predictive Checks
+
+We only looked at one simulation and discussed one $R^2$ value. That one $R^2$ value only told us if that one perticular simulation was a good model to explain our observations. We don't know if that simulation was a typical simulation or we got really unlucky and generated a really unusual simuation. Hence, we have to generate many more simulations to compare to our observed data to create a distribution of $R^2$ values. This will allow us to find out what is an average $R^2$ value and based on that value, how well does simulated data explain our observations on avgerage. 
+
+```{r}
+num_simulations <- 1000
+
+simulated_r_squared <- numeric(num_simulations)
+
+for(i in 1:num_simulations) {
+  
+  sim_response <- tibble(sim_sustain = random_error(predicted_sustain, sd = est_sigma))
+  
+  r_square_simulation <- lr_inequal_sustain |>
+    bind_cols(sim_response)
+  
+  #complete_data <- r_square_simulation |>
+    #filter(complete.cases(.)) # Returns cases that have no missing values
+  
+  sim_obs_model <- lm(med_sustainability ~ sim_sustain,
+                      data = r_square_simulation)
+  
+  simulated_r_squared[i] <-
+    summary(sim_obs_model)$r.squared
+}
+
+sim_r_square_df <- data.frame(r_squared = simulated_r_squared)
+
+ggplot(sim_r_square_df, aes(x = r_squared)) +
+  geom_histogram(bins = 20) +
+  geom_vline(aes(xintercept = original_r_squared), 
+color =  "red") +
+  labs(title = "Distribution of R-squared Values",
+       caption = "*Red line represents original R-squared value",
+       subtitle = "Frequency",
+       x = "R-squared values") +
+  theme(axis.title.y = element_blank(),
+        axis.title.x = element_text(size = 12),
+        axis.text.y = element_text(size = 10))
+```
+
+This is 1,000 $R^2$ values ploted on a plot. It is skewed to the left meaning that a typical $R^2$ value is small. This tells us that simulation does a poor job at explining our observations. OUr observations does not follow a linear model meaning our two variables are likely not related to one another. 
+
+## Conclusion
+
+It might seem that there might be a negative relationship between inequality index and sustainability index on paper. After all, low inequality or a more equal society can result in a highly educated society which is crucial to keep societies sustainable. However, from our attempt to fit a linear model and simulating generating many predictions for our data, it looks like the two variables are not related to one another. We cannot for certain say that the two variables are not related to one another since this was not an experiment but we can observe uncorellation and make hypotheses.
+
+## Reference
+
+Gapminder Datasets:
+[Inequality index and sustainability index dataset](https://www.gapminder.org/data/) 
